@@ -3,7 +3,7 @@ const { simpleParser } = require("mailparser");
 const axios = require("axios");
 
 const WEBHOOK_URL = "https://email-geneartor-production.up.railway.app/api/users/receive_email";
-const SMTP_PORT = 2525;
+const SMTP_PORT = 25;
 const ALLOWED_DOMAINS = ['tempemailbox.com']; // Add your domains here
 
 const server = new SMTPServer({
