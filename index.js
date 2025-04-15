@@ -2,68 +2,90 @@ const { SMTPServer } = require("smtp-server");
 const { simpleParser } = require("mailparser");
 const axios = require("axios");
 
-// Hardcoded configuration
 const WEBHOOK_URL = "https://email-geneartor-production.up.railway.app/api/users/receive_email";
-const SMTP_PORT = 2525; // Changed to 2525 since Railway needs this port
+const SMTP_PORT = 2525;
+const ALLOWED_DOMAINS = ['tempemailbox.com']; // Add your domains here
 
 const server = new SMTPServer({
   authOptional: true,
+  // Critical fix: Add domain validation
+  onRcptTo(address, session, callback) {
+    const domain = address.address.split('@')[1];
+    if (ALLOWED_DOMAINS.includes(domain)) {
+      console.log(`Accepted recipient: ${address.address}`);
+      callback();
+    } else {
+      console.log(`Rejected recipient: ${address.address}`);
+      callback(new Error(`550 Relay not allowed for ${domain}`));
+    }
+  },
   onConnect(session, callback) {
-    console.log(`New connection from ${session.remoteAddress}`);
+    console.log(`Connection from ${session.remoteAddress}`);
     callback();
   },
   onMailFrom(address, session, callback) {
     console.log(`Mail from: ${address.address}`);
     callback();
   },
-  onRcptTo(address, session, callback) {
-    console.log(`Mail to: ${address.address}`);
-    callback();
-  },
   onData(stream, session, callback) {
     console.log('Processing email...');
     
-    simpleParser(stream)
-      .then(parsed => {
-        const { from, to, subject, text, html, attachments } = parsed;
-        console.log(`Received email to ${to.value[0].address}`);
+    simpleParser(stream, {
+      skipHtmlToText: true,
+      skipTextToHtml: true,
+      skipImageLinks: true
+    })
+    .then(parsed => {
+      const emailData = {
+        from: parsed.from?.value[0]?.address || parsed.from?.text,
+        to: parsed.to?.value.map(t => t.address) || [],
+        subject: parsed.subject,
+        text: parsed.text,
+        html: parsed.html,
+        date: parsed.date,
+        attachments: parsed.attachments.map(a => ({
+          filename: a.filename,
+          contentType: a.contentType,
+          size: a.size
+        }))
+      };
 
-        // Hardcoded webhook call
-        axios.post(WEBHOOK_URL, {
-          from: from.text,
-          to: to.value.map(t => t.address),
-          subject,
-          text,
-          html,
-          attachments: attachments.map(a => ({
-            filename: a.filename,
-            contentType: a.contentType,
-            size: a.size
-          })),
-        })
-        .then(response => {
-          console.log('Webhook response:', response.status, response.data);
-          callback();
-        })
-        .catch(err => {
-          console.error('Webhook error:', err.response?.data || err.message);
-          callback(err);
-        });
-      })
-      .catch(err => {
-        console.error('Parsing error:', err);
-        callback(err);
+      console.log('Sending to webhook:', emailData.subject);
+      
+      return axios.post(WEBHOOK_URL, emailData, {
+        timeout: 5000,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Email-Server': 'TempMailServer'
+        }
       });
+    })
+    .then(response => {
+      console.log('Webhook success:', response.status);
+      callback();
+    })
+    .catch(err => {
+      console.error('Error:', err.message);
+      if (err.response) {
+        console.error('Webhook response error:', err.response.data);
+      }
+      callback(new Error('450 Temporary processing failure'));
+    });
   },
-  disabledCommands: ['AUTH']
+  disabledCommands: ['AUTH'],
+  logger: true
 });
 
-server.listen(SMTP_PORT, () => {
-  console.log(`SMTP Server running on port ${SMTP_PORT}`);
-  console.log(`Webhook URL: ${WEBHOOK_URL}`);
-});
-
-// Add error handling
+// Enhanced error handling
 server.on('error', err => {
-  console.error('Server error:', err);
+  console.error('Server error:', err.message);
+});
+
+process.on('uncaughtException', err => {
+  console.error('Uncaught exception:', err);
+});
+
+server.listen(SMTP_PORT, '0.0.0.0', () => {
+  console.log(`SMTP server running on port ${SMTP_PORT}`);
+  console.log(`Accepting emails for domains: ${ALLOWED_DOMAINS.join(', ')}`);
 });
