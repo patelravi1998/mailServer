@@ -28,6 +28,8 @@ const server = new SMTPServer({
     callback();
   },
 // In your SMTP server code (where you have onData handler)
+// ... (keep all existing code until the onData handler)
+
 onData(stream, session, callback) {
   console.log('Processing email...');
   
@@ -42,13 +44,20 @@ onData(stream, session, callback) {
     const attachments = await Promise.all(
       parsed.attachments.map(async (a) => {
         console.log('Processing attachment:', a.filename, 'Size:', a.size, 'Has content:', !!a.content);
+        
+        // Ensure we have content or skip the attachment
+        if (!a.content) {
+          console.warn(`Attachment ${a.filename} has no content, skipping`);
+          return null;
+        }
+        
         return {
-          filename: a.filename,
-          contentType: a.contentType,
-          size: a.size,
-          content: a.content ? a.content.toString('base64') : null
+          filename: a.filename || 'unnamed-file',
+          contentType: a.contentType || 'application/octet-stream',
+          size: a.size || 0,
+          content: a.content.toString('base64')
         };
-      })
+      }).filter(a => a !== null) // Filter out null attachments
     );
 
     const emailData = {
@@ -83,6 +92,8 @@ onData(stream, session, callback) {
     callback(new Error('450 Temporary processing failure'));
   });
 },
+
+// ... (keep rest of the existing code)
   disabledCommands: ['AUTH'],
   logger: true
 });
