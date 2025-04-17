@@ -37,14 +37,16 @@ onData(stream, session, callback) {
     skipImageLinks: true
   })
   .then(async (parsed) => {
-    // Process attachments to include content
+    console.log('Raw attachments received:', parsed.attachments);
+    
     const attachments = await Promise.all(
       parsed.attachments.map(async (a) => {
+        console.log('Processing attachment:', a.filename, 'Size:', a.size, 'Has content:', !!a.content);
         return {
           filename: a.filename,
           contentType: a.contentType,
           size: a.size,
-          content: a.content.toString('base64') // Convert content to base64
+          content: a.content ? a.content.toString('base64') : null
         };
       })
     );
