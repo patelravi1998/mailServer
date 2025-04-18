@@ -31,24 +31,33 @@ const server = new SMTPServer({
   },
 
   onData(stream, session, callback) {
-    console.log('Processing email...');
-
-    simpleParser(stream, {
-      skipHtmlToText: true,
-      skipTextToHtml: true,
-      skipImageLinks: true
-    })
-      .then(async (parsed) => {
-        console.log('Raw attachments received:', parsed.attachments);
-
-        // Process attachments and filter AFTER Promise.all
+    console.log('Receiving email stream...');
+  
+    let rawData = Buffer.alloc(0);
+  
+    stream.on('data', (chunk) => {
+      rawData = Buffer.concat([rawData, chunk]);
+    });
+  
+    stream.on('end', async () => {
+      console.log('Finished receiving email. Now parsing...');
+  
+      try {
+        const parsed = await simpleParser(rawData, {
+          skipHtmlToText: true,
+          skipTextToHtml: true,
+          skipImageLinks: true
+        });
+  
+        console.log('Parsed attachments:', parsed.attachments);
+  
         const attachmentsRaw = await Promise.all(
           parsed.attachments.map(async (a) => {
             if (!a.content) {
               console.warn(`Attachment ${a.filename} has no content, skipping`);
               return null;
             }
-
+  
             return {
               filename: a.filename || 'unnamed-file',
               contentType: a.contentType || 'application/octet-stream',
@@ -57,9 +66,9 @@ const server = new SMTPServer({
             };
           })
         );
-
+  
         const attachments = attachmentsRaw.filter(a => a !== null);
-
+  
         const emailData = {
           from: parsed.from?.value[0]?.address || parsed.from?.text,
           to: parsed.to?.value.map(t => t.address) || [],
@@ -69,29 +78,25 @@ const server = new SMTPServer({
           date: parsed.date,
           attachments: attachments
         };
-
-        console.log('Sending to webhook:', emailData.subject);
-
-        return axios.post(WEBHOOK_URL, emailData, {
+  
+        console.log('Sending parsed email to webhook...');
+  
+        await axios.post(WEBHOOK_URL, emailData, {
           timeout: 5000,
           headers: {
             'Content-Type': 'application/json',
             'X-Email-Server': 'TempMailServer'
           }
         });
-      })
-      .then(response => {
-        console.log('Webhook success:', response.status);
+  
         callback();
-      })
-      .catch(err => {
-        console.error('Error:', err.message);
-        if (err.response) {
-          console.error('Webhook response error:', err.response.data);
-        }
+      } catch (err) {
+        console.error('Error during parsing or webhook:', err);
         callback(new Error('450 Temporary processing failure'));
-      });
+      }
+    });
   },
+  
 
   disabledCommands: ['AUTH'],
   logger: true
