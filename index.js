@@ -34,31 +34,40 @@ const server = new SMTPServer({
   // 🔥 FIXED onData with stream buffering
   onData(stream, session, callback) {
     console.log('📩 Processing incoming email...');
-
-    // Buffer the stream first before passing to simpleParser
+  
     const chunks = [];
     stream.on("data", (chunk) => chunks.push(chunk));
     stream.on("end", async () => {
       const fullBuffer = Buffer.concat(chunks);
-
+  
       try {
         const parsed = await simpleParser(fullBuffer, {
           skipHtmlToText: true,
           skipTextToHtml: true,
           skipImageLinks: true
         });
-
+  
         console.log('📎 Attachments parsed:', parsed.attachments?.length);
-
-        const attachments = parsed.attachments.map((a) => {
-          return {
-            filename: a.filename || 'unnamed-file',
-            contentType: a.contentType || 'application/octet-stream',
-            size: a.size || 0,
-            content: a.content ? a.content.toString('base64') : null
-          };
-        }).filter(a => a.content); // Filter out if content missing
-
+  
+        // Process attachments with better error handling
+        const attachments = [];
+        for (const a of parsed.attachments || []) {
+          try {
+            if (a.content) {
+              attachments.push({
+                filename: a.filename || 'unnamed-file',
+                contentType: a.contentType || 'application/octet-stream',
+                size: a.size || 0,
+                content: a.content.toString('base64') // Convert to base64
+              });
+            } else {
+              console.warn('⚠️ Attachment has no content:', a.filename);
+            }
+          } catch (err) {
+            console.error('❌ Error processing attachment:', err);
+          }
+        }
+  
         const emailData = {
           from: parsed.from?.value[0]?.address || parsed.from?.text,
           to: parsed.to?.value.map(t => t.address) || [],
@@ -66,19 +75,23 @@ const server = new SMTPServer({
           text: parsed.text,
           html: parsed.html,
           date: parsed.date,
-          attachments: attachments
+          attachments: attachments // This now includes base64 content
         };
-
+  
         console.log('📤 Sending to webhook:', emailData.subject);
-
+        console.log('📎 Attachment content present:', 
+          emailData.attachments.length > 0 ? 
+          emailData.attachments[0].content?.length > 0 : false);
+  
         const response = await axios.post(WEBHOOK_URL, emailData, {
           timeout: 5000,
+          maxBodyLength: Infinity, // Important for large attachments
           headers: {
             'Content-Type': 'application/json',
             'X-Email-Server': 'TempMailServer'
           }
         });
-
+  
         console.log('✅ Webhook success:', response.status);
         callback();
       } catch (err) {
