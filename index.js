@@ -3,7 +3,12 @@ const { simpleParser } = require("mailparser");
 const axios = require("axios");
 const stream = require("stream");
 
-const WEBHOOK_URL = "https://email-geneartor-production.up.railway.app/api/users/receive_email";
+// ✅ Webhook URLs
+const WEBHOOK_URLS = [
+  "https://email-geneartor-production.up.railway.app/api/users/receive_email",
+  "https://email-geneartor-development.up.railway.app/api/users/receive_email"
+];
+
 const SMTP_PORT = 25;
 const ALLOWED_DOMAINS = ['tempemailbox.com']; // Add your domains here
 
@@ -31,11 +36,10 @@ const server = new SMTPServer({
     callback();
   },
 
-  // 🔥 FIXED onData with stream buffering
+  // ✅ Updated onData with multiple webhooks
   onData(stream, session, callback) {
     console.log('📩 Processing incoming email...');
 
-    // Buffer the stream first before passing to simpleParser
     const chunks = [];
     stream.on("data", (chunk) => chunks.push(chunk));
     stream.on("end", async () => {
@@ -57,7 +61,7 @@ const server = new SMTPServer({
             size: a.size || 0,
             content: a.content ? a.content.toString('base64') : null
           };
-        }).filter(a => a.content); // Filter out if content missing
+        }).filter(a => a.content); // Filter out empty attachments
 
         const emailData = {
           from: parsed.from?.value[0]?.address || parsed.from?.text,
@@ -69,23 +73,29 @@ const server = new SMTPServer({
           attachments: attachments
         };
 
-        console.log('📤 Sending to webhook:', emailData.subject);
+        console.log('📤 Sending to webhooks:', emailData.subject);
 
-        const response = await axios.post(WEBHOOK_URL, emailData, {
-          timeout: 5000,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Email-Server': 'TempMailServer'
-          }
-        });
+        const webhookPromises = WEBHOOK_URLS.map(url =>
+          axios.post(url, emailData, {
+            timeout: 5000,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Email-Server': 'TempMailServer'
+            }
+          }).then(res => {
+            console.log(`✅ Webhook success (${url}):`, res.status);
+          }).catch(err => {
+            console.error(`❌ Webhook error (${url}):`, err.message);
+            if (err.response) {
+              console.error(`❌ Response error (${url}):`, err.response.data);
+            }
+          })
+        );
 
-        console.log('✅ Webhook success:', response.status);
+        await Promise.allSettled(webhookPromises); // Allow all webhooks to run independently
         callback();
       } catch (err) {
         console.error('❌ Error processing email:', err.message);
-        if (err.response) {
-          console.error('❌ Webhook response error:', err.response.data);
-        }
         callback(new Error('450 Temporary processing failure'));
       }
     });
