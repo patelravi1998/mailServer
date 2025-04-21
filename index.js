@@ -5,7 +5,7 @@ const stream = require("stream");
 
 const WEBHOOK_URL = "https://email-geneartor-production.up.railway.app/api/users/receive_email";
 const SMTP_PORT = 25;
-const ALLOWED_DOMAINS = ['tempemailbox.com']; // Add your domains here
+const ALLOWED_DOMAINS = ['tempemailbox.com','anonemail.space']; // Add your domains here
 
 const server = new SMTPServer({
   authOptional: true,
