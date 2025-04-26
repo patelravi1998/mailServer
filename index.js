@@ -6,16 +6,15 @@ const stream = require("stream");
 const WEBHOOK_URL = "https://email-geneartor-production.up.railway.app/api/users/receive_email";
 const SMTP_PORT = 25;
 const ALLOWED_DOMAINS = ['tempemailbox.com','anonemail.space']; // Add your domains here
+
 const server = new SMTPServer({
   authOptional: true,
-
   onRcptTo(address, session, callback) {
     const domain = address.address.split('@')[1];
     if (ALLOWED_DOMAINS.includes(domain)) {
-      console.log(`✅ Accepted recipient: ${address.address}`);
-      callback();
+      return callback(); // allow
     } else {
-      console.log(`❌ Rejected recipient: ${address.address}`);
+      console.log(`❌ Relay not allowed for ${address.address}`);
       callback(new Error(`550 Relay not allowed for ${domain}`));
     }
   },
@@ -36,8 +35,8 @@ const server = new SMTPServer({
 
     // Buffer the stream first before passing to simpleParser
     const chunks = [];
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("end", async () => {
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('end', async () => {
       const fullBuffer = Buffer.concat(chunks);
 
       try {
@@ -49,7 +48,7 @@ const server = new SMTPServer({
 
         console.log('📎 Attachments parsed:', parsed.attachments?.length);
 
-        const attachments = parsed.attachments.map((a) => {
+        const attachments = (parsed.attachments || []).map((a) => {
           return {
             filename: a.filename || 'unnamed-file',
             contentType: a.contentType || 'application/octet-stream',
@@ -68,7 +67,7 @@ const server = new SMTPServer({
           attachments: attachments
         };
 
-        console.log('📤 Sending to webhook:', emailData.subject);
+        console.log(`📤 Sending to webhook: ${emailData.subject}`);
 
         const response = await axios.post(WEBHOOK_URL, emailData, {
           timeout: 5000,
@@ -78,12 +77,12 @@ const server = new SMTPServer({
           }
         });
 
-        console.log('✅ Webhook success:', response.status);
+        console.log(`✅ Webhook success: ${response.status}`);
         callback();
       } catch (err) {
-        console.error('❌ Error processing email:', err.message);
+        console.error(`❌ Error processing email: ${err.message}`);
         if (err.response) {
-          console.error('❌ Webhook response error:', err.response.data);
+          console.error(`❌ Webhook response error: ${JSON.stringify(err.response.data)}`);
         }
         callback(new Error('450 Temporary processing failure'));
       }
@@ -94,12 +93,12 @@ const server = new SMTPServer({
   logger: true
 });
 
-server.on('error', err => {
-  console.error('❗ Server error:', err.message);
+server.on('error', (err) => {
+  console.error(`❗ Server error: ${err.message}`);
 });
 
-process.on('uncaughtException', err => {
-  console.error('❗ Uncaught exception:', err);
+process.on('uncaughtException', (err) => {
+  console.error(`❗ Uncaught exception: ${err}`);
 });
 
 server.listen(SMTP_PORT, '0.0.0.0', () => {
